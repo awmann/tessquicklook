@@ -429,6 +429,14 @@ def quicklooktessffi(
             t=tcor, f=thisf, fcor=thisfcor, fcormed=thisfcormed,
             err_photon=thiserr, err_empirical=emp,
             usecirc=usecirc, best=best, scirc=scirc, spsf=spsf,
+            # Appa Task 3c: the PRF-scene-model dilution this block already
+            # computes and applies via `undilute` was previously discarded
+            # once applied -- callers had no way to record *what* fraction
+            # of the aperture was target flux, only the already-corrected
+            # light curve. Stored per-aperture (all 10 circular + 10 PRF),
+            # so the chosen aperture's value is `circcontam[best]` or
+            # `psfcontam[best]` depending on `usecirc`.
+            circcontam=circcontam, psfcontam=psfcontam,
             raw=raw_k, data=data, datamed=datamed,
             quats=quats_k, cbvs=cbvs_k,
             circmasks=raw["circmasks"], psfmasks=raw["psfmasks"],
