@@ -233,12 +233,14 @@ def quatcorrect_one(
     """Port of ``quatcorrectonelc.pro``.
 
     Fits the joint model to ``flux - 1`` and returns
-    ``(corrected_flux, sysmodel, fullmodel, coeffs)`` where
+    ``(corrected_flux, sysmodel, fullmodel, coeffs, good)`` where
     ``corrected_flux = flux - sysmodel`` -- systematics removed, astrophysical
-    variability retained.
+    variability retained, and ``good`` is the post-sigma-clipping cadence
+    index array `decorrelate()` fit on (needed downstream to reconstruct the
+    exact operator this fit applied -- see ``quatcorrect``'s docstring).
     """
     flux = np.asarray(flux, dtype=float)
-    coeffs, design, ncol_var, _ = decorrelate(
+    coeffs, design, ncol_var, good = decorrelate(
         time, flux - 1.0, vectors,
         order=order, torder=torder, maxiter=maxiter,
         include=include, afull=afull, solver=solver,
@@ -247,7 +249,7 @@ def quatcorrect_one(
     fullmodel = design @ coeffs
     # Systematics-only model: every column past the variability block.
     sysmodel = design[:, ncol_var:] @ coeffs[ncol_var:]
-    return flux - sysmodel, sysmodel, fullmodel, coeffs
+    return flux - sysmodel, sysmodel, fullmodel, coeffs, good
 
 
 def quatcorrect(
@@ -274,7 +276,24 @@ def quatcorrect(
 
     Returns a dict with ``fcirccor``/``fpsfcor`` (systematics removed,
     renormalised to a median of 1) and ``fcirccorflat``/``fpsfcorflat``
-    (residual about the full joint model).
+    (residual about the full joint model), plus everything needed to
+    reconstruct the exact fitted operator later without re-solving anything
+    (Appa Task 2 / awmann/tessquicklook#1): ``design_vectors`` (the
+    systematics regressors, pre-power-expansion -- shared across apertures,
+    since only the flux `y` differs between them), ``design_afull`` (the
+    spline variability-basis block, or ``None`` for ``"poly"``),
+    ``design_order``/``design_torder`` (to rebuild the polynomial block and
+    the systematics power expansion exactly), and, per aperture,
+    ``fit_coeffs`` (shape ``(n_apertures, ncoeffs)``) and ``fit_good_mask``
+    (shape ``(n_apertures, npoints)``, boolean -- the post-sigma-clipping
+    cadence mask each aperture's fit actually used). With these, the design
+    matrix for aperture ``i`` is
+    ``hstack([variability_block, vectors**1, ..., vectors**order])`` (where
+    ``variability_block`` is ``design_afull`` if not None, else the
+    ``design_torder``-degree polynomial `decorrelate()` builds from `t`),
+    and the fit it solved is that matrix restricted to
+    ``fit_good_mask[i]`` -- exactly reproducing ``decorrelate()``'s own
+    equilibration and solve without rerunning it.
     """
     t = np.asarray(rawdata["t"], dtype=float)
     n = t.size
@@ -293,22 +312,33 @@ def quatcorrect(
         "t": t,
         "vector_names": vecnames,
         "variability_basis": variability_basis,
+        "design_vectors": vectors,
+        "design_afull": afull,
+        "design_order": order,
+        "design_torder": torder,
     }
     for kind in ("fcirc", "fpsf"):
         cor = np.full((n, n_apertures), np.nan)
         flat = np.full((n, n_apertures), np.nan)
+        ncoeffs = vectors.shape[1] * order + (afull.shape[1] if afull is not None else torder + 1)
+        coeffs_all = np.full((n_apertures, ncoeffs), np.nan)
+        good_mask = np.zeros((n_apertures, n), dtype=bool)
         for i in range(n_apertures):
             f = np.asarray(rawdata[kind], dtype=float)[:, i]
             if not np.all(np.isfinite(f)):
                 continue
-            corrected, _, fullmodel, _ = quatcorrect_one(
+            corrected, _, fullmodel, coeffs, good = quatcorrect_one(
                 t, f, vectors, order=order, torder=torder,
                 afull=afull, maxiter=maxiter, solver=solver,
             )
             cor[:, i] = corrected - np.median(corrected) + 1.0
             flat[:, i] = f - fullmodel
+            coeffs_all[i, :len(coeffs)] = coeffs
+            good_mask[i, good] = True
         out[kind] = np.asarray(rawdata[kind], dtype=float)
         out[kind + "cor"] = cor
         out[kind + "corflat"] = flat
+        out[kind + "_fit_coeffs"] = coeffs_all
+        out[kind + "_fit_good_mask"] = good_mask
 
     return out

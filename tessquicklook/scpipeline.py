@@ -281,8 +281,12 @@ def quicklooktesssc(
         fsap = sap / norm
 
         common = dict(order=order, torder=torder, afull=afull, solver=solver)
-        corlc, sysmodel, _, _ = quatcorrect_one(t, fsap, vectors, **common)
-        cormedlc, _, _, _ = quatcorrect_one(t, fsap, bgvectors, **common)
+        corlc, sysmodel, _, fit_coeffs, fit_good = quatcorrect_one(t, fsap, vectors, **common)
+        cormedlc, _, _, fit_coeffs_med, fit_good_med = quatcorrect_one(t, fsap, bgvectors, **common)
+        fit_good_mask = np.zeros(t.size, dtype=bool)
+        fit_good_mask[fit_good] = True
+        fit_good_mask_med = np.zeros(t.size, dtype=bool)
+        fit_good_mask_med[fit_good_med] = True
 
         # --- dilution: one header keyword, no scene model ------------------
         crowdsap = lc["crowdsap"] if contamination else 1.0
@@ -309,6 +313,15 @@ def quicklooktesssc(
             err_photon=err_photon, err_empirical=emp,
             quats=quats_k, cbvs=cbvs_k, vector_names=vecnames,
             xcms=lc["xcms"][keep], ycms=lc["ycms"][keep],
+            # Appa Task 2 / awmann/tessquicklook#1: everything needed to
+            # reconstruct the exact fitted systematics operator without
+            # re-solving. `fcor` came from `vectors`+`fit_coeffs`+
+            # `fit_good_mask`; `fcormed` from `bgvectors` (=vectors plus the
+            # background column)+`fit_coeffs_med`+`fit_good_mask_med`.
+            design_vectors=vectors, design_bgvectors=bgvectors, design_afull=afull,
+            design_order=order, design_torder=torder,
+            fit_coeffs=fit_coeffs, fit_good_mask=fit_good_mask,
+            fit_coeffs_med=fit_coeffs_med, fit_good_mask_med=fit_good_mask_med,
         ))
 
         if rebin:
