@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tessquicklook"
+version = "0.2.0"
+description = "TESS light curves with systematics and stellar variability fit simultaneously"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Andrew W. Mann" }]
+keywords = ["TESS", "exoplanets", "photometry", "light curves", "young stars"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.8",
+    "astropy>=5.0",
+    "astroquery>=0.4.6",
+    "lightkurve>=2.4",
+    "tess-point>=0.9",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+dev = ["pandas"]
+
+[project.urls]
+Homepage = "https://github.com/awmann/tessquicklook"
+Issues = "https://github.com/awmann/tessquicklook/issues"
+
+[tool.setuptools]
+packages = ["tessquicklook"]
