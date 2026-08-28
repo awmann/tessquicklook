@@ -200,7 +200,18 @@ def _engineering_listing(refresh=False, attempts=3, timeout=30):
 
 
 def load_quaternion_file(sector, search_dirs=None, download=True):
-    """Locate (or fetch) the quaternion FITS file for a sector."""
+    """Locate (or fetch) the quaternion FITS file for a sector.
+
+    Returns ``(path, was_downloaded)``. ``was_downloaded`` is True only when
+    this call itself fetched the file into the owned cache directory
+    (``systematics_cache_dir()/quaternions/fits``) -- False for every file
+    found via ``search_dirs``, ``TESSQUICKLOOK_QUATERNION_DIR``, or the
+    legacy path. Callers that delete the file after extracting from it
+    (``discard_fits``) must check this first: a pre-staged
+    ``TESSQUICKLOOK_QUATERNION_DIR`` (WanShiTon's whole reason for existing)
+    is not this process's file to delete, and doing so anyway silently ate a
+    435 MB pre-staged sector-47 file before this was fixed.
+    """
     pattern = re.compile(rf"tess\d+_sector{int(sector):02d}-quat\.fits$")
     dirs = list(search_dirs or [])
     env = os.environ.get("TESSQUICKLOOK_QUATERNION_DIR")
@@ -215,7 +226,7 @@ def load_quaternion_file(sector, search_dirs=None, download=True):
             continue
         for f in sorted(d.iterdir()):
             if pattern.search(f.name):
-                return f
+                return f, False
 
     if not download:
         raise FileNotFoundError(f"No quaternion file for sector {sector}")
@@ -229,7 +240,7 @@ def load_quaternion_file(sector, search_dirs=None, download=True):
         raise FileNotFoundError(f"No quaternion file on MAST for sector {sector}")
     name = sorted(names)[-1]
     dest = systematics_cache_dir() / "quaternions" / "fits" / name
-    return _fetch_large_file(f"{_ENGINEERING}/{name}", dest)
+    return _fetch_large_file(f"{_ENGINEERING}/{name}", dest), True
 
 
 def load_quaternion_arrays(sector, cam=DEFAULT_QUAT_CAMERA, search_dirs=None,
@@ -253,7 +264,7 @@ def load_quaternion_arrays(sector, cam=DEFAULT_QUAT_CAMERA, search_dirs=None,
         except Exception:  # noqa: BLE001
             pass
 
-    path = load_quaternion_file(sector, search_dirs=search_dirs, download=download)
+    path, was_downloaded = load_quaternion_file(sector, search_dirs=search_dirs, download=download)
     with fits.open(path, memmap=True) as hdul:
         qt = hdul[2].data
         qtime = np.array(qt["TIME"], dtype=float)
@@ -264,7 +275,13 @@ def load_quaternion_arrays(sector, cam=DEFAULT_QUAT_CAMERA, search_dirs=None,
     try:
         npz.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(npz, time=qtime, q=q)
-        if discard_fits:
+        # Only ever delete a file this call downloaded itself, into the cache
+        # directory it owns -- never one found via search_dirs, the
+        # TESSQUICKLOOK_QUATERNION_DIR pre-staging directory, or the legacy
+        # path. See load_quaternion_file's docstring for the incident this
+        # fixes: discard_fits=True deleted a 435 MB pre-staged sector-47 file
+        # that this process never downloaded and had no business removing.
+        if discard_fits and was_downloaded:
             Path(path).unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
         pass
