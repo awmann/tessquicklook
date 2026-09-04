@@ -80,11 +80,69 @@ def normalise_exptime(exptime):
     return float(exptime)
 
 
+def _is_same_tic(target_name, ticid):
+    """True if a search-result ``target_name`` refers to this TIC.
+
+    MAST returns the bare TIC number for SPOC light-curve products, but accept
+    a ``TIC 12345`` style label too rather than silently dropping every row if
+    that ever changes.
+    """
+    text = str(target_name).strip()
+    if text.upper().startswith("TIC"):
+        text = text[3:].lstrip(" :_")
+    try:
+        return int(text) == int(ticid)
+    except (TypeError, ValueError):
+        return False
+
+
+def _filter_to_target(table, ticid):
+    """Boolean mask selecting only rows that belong to ``ticid``.
+
+    ``lk.search_lightcurve("TIC <id>")`` is a CONE search, so any neighbour
+    with its own SPOC products comes back in the same table.  Unfiltered, those
+    rows get downloaded and stitched in as though they were extra sectors of
+    the target -- e.g. TIC 56658270 also returns TIC 56658273, doubling its
+    light curve to 63,343 cadences from a true 31,671.  MAST reports both at
+    ``distance = 0.0`` arcsec, so position cannot separate them; only the
+    target identity can.
+    """
+    if len(table) == 0:
+        return np.zeros(0, dtype=bool)
+    if "target_name" not in table.colnames:
+        return np.ones(len(table), dtype=bool)
+
+    mine = np.array([_is_same_tic(name, ticid) for name in table["target_name"]],
+                    dtype=bool)
+    others = sorted({str(n).strip() for n, m in zip(table["target_name"], mine) if not m})
+
+    if not mine.any():
+        # Nothing matched.  Returning a neighbour's data silently would be far
+        # worse than returning nothing, so say so and let the caller fall back.
+        warnings.warn(
+            f"TIC {int(ticid)}: no SPOC search result matched this TIC "
+            f"(target_name values: {others}); returning no SPOC products.",
+            stacklevel=3,
+        )
+    elif others:
+        warnings.warn(
+            f"TIC {int(ticid)}: cone search also returned SPOC products for "
+            f"{', '.join(others)}; dropping them. This target has close "
+            f"neighbours, so check blending/dilution.",
+            stacklevel=3,
+        )
+    return mine
+
+
 def search_spoc(ticid, exptime=None, sectors=None):
     """Return the SPOC light-curve products for a TIC ID as an astropy table.
 
     Columns of interest: ``sequence_number`` (sector), ``exptime``,
     ``productFilename``, ``dataURI``.
+
+    Only products belonging to ``ticid`` itself are returned.  That filtering
+    is not redundant: the underlying search is positional.  See
+    :func:`_filter_to_target`.
     """
     import logging
 
@@ -117,6 +175,8 @@ def search_spoc(ticid, exptime=None, sectors=None):
     if sectors is not None:
         want = {int(s) for s in sectors}
         keep &= np.array([int(s) in want for s in table["sequence_number"]])
+
+    keep &= _filter_to_target(table, ticid)
     return table[keep]
 
 

@@ -7,6 +7,7 @@ uses, which is the part most likely to change silently.
 """
 
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,8 @@ from tessquicklook.scpipeline import _quality_mask  # noqa: E402
 from tessquicklook.spoc import (  # noqa: E402
     EXPTIME_FAST,
     EXPTIME_SHORT,
+    _filter_to_target,
+    _is_same_tic,
     normalise_exptime,
 )
 
@@ -42,6 +45,58 @@ def test_exptime_aliases():
         check("bad alias raises", False, True)
     except ValueError:
         check("bad alias raises ValueError", True, True)
+
+
+def test_same_tic():
+    print("\ntarget identity matching")
+    for name in ("56658270", " 56658270 ", "TIC 56658270", "TIC_56658270",
+                 "tic 56658270", 56658270):
+        check(f"_is_same_tic({name!r})", _is_same_tic(name, 56658270), True)
+    for name in ("56658273", "", "not-a-tic", None):
+        check(f"_is_same_tic({name!r}) rejected", _is_same_tic(name, 56658270), False)
+
+
+def test_cone_search_filter():
+    """Regression: a cone search returns neighbours, and they must be dropped.
+
+    lk.search_lightcurve("TIC <id>") is positional, so TIC 56658270 also
+    returns TIC 56658273 -- at distance 0.0 arcsec, so only the identity check
+    separates them.  Unfiltered this doubled that target's light curve from
+    31,671 to 63,343 cadences with no warning.
+    """
+    print("\ncone-search contamination filter")
+    from astropy.table import Table
+
+    mixed = Table({"target_name": ["56658270", "56658273", "56658270", "56658273"],
+                   "sequence_number": [43, 43, 44, 44]})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mask = _filter_to_target(mixed, 56658270)
+    check("neighbour rows dropped", list(mask), [True, False, True, False])
+    check("warns about the neighbour",
+          any("56658273" in str(w.message) for w in caught), True)
+
+    clean = Table({"target_name": ["166527623"] * 3, "sequence_number": [11, 38, 64]})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mask = _filter_to_target(clean, 166527623)
+    check("uncontaminated target untouched", list(mask), [True, True, True])
+    check("and stays silent", len(caught), 0)
+
+    # No match at all -> return nothing, loudly, rather than a neighbour's data
+    wrong = Table({"target_name": ["99999999"], "sequence_number": [7]})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mask = _filter_to_target(wrong, 56658270)
+    check("no match returns empty mask", list(mask), [False])
+    check("no match warns", len(caught), 1)
+
+    check("empty table is safe", list(_filter_to_target(Table({"target_name": []}), 1)), [])
+
+    # A table without the column (older lightkurve) must not be filtered away
+    nocol = Table({"sequence_number": [11, 38]})
+    check("missing target_name column keeps all",
+          list(_filter_to_target(nocol, 166527623)), [True, True])
 
 
 def test_priority():
@@ -104,6 +159,8 @@ def test_quality_mask():
 
 def main():
     test_exptime_aliases()
+    test_same_tic()
+    test_cone_search_filter()
     test_priority()
     test_quality_mask()
     print()
