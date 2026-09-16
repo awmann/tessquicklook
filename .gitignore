@@ -26,6 +26,15 @@ examples/example_lightcurve.png
 examples/example_lightcurve.csv
 examples/cadence_example.png
 
+# Local analysis scripts for other projects (TIDYE Appa Task 2 linearity
+# checks) that happen to be run from this directory -- not part of the package.
+appa_task*.py
+
+# Stray data products, in case a cache or output dir is pointed inside the repo
+# (quaternion files are ~430 MB each; .part is an in-progress download).
+*.fits
+*.part
+
 # Python
 *.pyc
 __pycache__/
@@ -35,6 +44,7 @@ dist/
 .venv/
 venv/
 .ipynb_checkpoints/
+.pytest_cache/
 
 # Editors / OS
 .DS_Store
