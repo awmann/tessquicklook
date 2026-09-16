@@ -76,7 +76,7 @@ def main():
             print("   ^^ EXCEEDS tolerance")
 
     # The high-level wrapper must reproduce the same thing.
-    c2, s2, m2, _ = quatcorrect_one(t, f, mvecs, order=2, torder=5)
+    c2, s2, m2, _, _ = quatcorrect_one(t, f, mvecs, order=2, torder=5)
     d = np.max(np.abs(c2 - corr_idl))
     print(f"{'quatcorrect_one':20s}: max|Δ| = {d:.3e}")
     if d > 1e-10:
