@@ -171,6 +171,7 @@ def quicklooktessffi(
     solver="normal",
     discard_quaternion_fits=False,
     outfile=None,
+    write_sector=True,
     verbose=True,
 ):
     """Run the quick-look FFI pipeline for one TIC ID.
@@ -191,8 +192,12 @@ def quicklooktessffi(
         the stellar signal and it is then subtracted -- the same target
         degrades to 2703 ppm.  Provided for diagnosis, not for science.
 
+    ``write_sector`` controls whether the per-point ``sector`` column is
+    written to ``outfile``; it is on by default.
+
     Returns a dict with the stitched light curve (``t``, ``f``, ``fcor``,
-    ``fcormed``, ``err_photon``, ``err_empirical``) and per-sector detail.
+    ``fcormed``, ``err_photon``, ``err_empirical``, ``cadence_s``, ``sector``)
+    and per-sector detail.
     """
     excludesector = set(int(s) for s in (excludesector or []))
     only_sectors = set(int(s) for s in only_sectors) if only_sectors else None
@@ -254,7 +259,7 @@ def quicklooktessffi(
 
     sectors_out = []
     allt, allf, allfcor, allfcormed = [], [], [], []
-    allerr_ph, allerr_emp, allcad = [], [], []
+    allerr_ph, allerr_emp, allcad, allsec = [], [], [], []
 
     for path in files:
         sec, cam, ccd = _sector_from_filename(path)
@@ -456,6 +461,7 @@ def quicklooktessffi(
             allerr_ph.append(rb["e"])
             allerr_emp.append(np.full(rb["t"].size, emp))
             allcad.append(np.full(rb["t"].size, cad * num * 60.0))
+            allsec.append(np.full(rb["t"].size, sec, dtype=int))
         else:
             allt.append(tcor)
             allf.append(thisf)
@@ -464,6 +470,7 @@ def quicklooktessffi(
             allerr_ph.append(thiserr)
             allerr_emp.append(np.full(tcor.size, emp))
             allcad.append(np.full(tcor.size, cadence * 86400.0))
+            allsec.append(np.full(tcor.size, sec, dtype=int))
 
     if not sectors_out:
         raise RuntimeError("No sectors survived selection")
@@ -475,10 +482,12 @@ def quicklooktessffi(
     err_ph = np.concatenate(allerr_ph)
     err_emp = np.concatenate(allerr_emp)
     cad_s = np.concatenate(allcad)
+    sec_arr = np.concatenate(allsec)
 
     order_idx = np.argsort(t)
-    t, f, fcor, fcormed, err_ph, err_emp, cad_s = (
-        a[order_idx] for a in (t, f, fcor, fcormed, err_ph, err_emp, cad_s)
+    t, f, fcor, fcormed, err_ph, err_emp, cad_s, sec_arr = (
+        a[order_idx]
+        for a in (t, f, fcor, fcormed, err_ph, err_emp, cad_s, sec_arr)
     )
 
     flat, _, _ = keplerspline(t, fcor, ndays=ndays)
@@ -497,25 +506,35 @@ def quicklooktessffi(
         "err_photon": err_ph,
         "err_empirical": err_emp,
         "cadence_s": cad_s,
+        "sector": sec_arr,
         "sectors": sectors_out,
         "variability_basis": variability_basis,
         "source": "FFI",
     }
 
     if outfile:
-        write_lightcurve(result, outfile)
+        write_lightcurve(result, outfile, include_sector=write_sector)
         if verbose:
             print(f"Wrote {outfile}")
 
     return result
 
 
-def write_lightcurve(result, outfile):
+def write_lightcurve(result, outfile, include_sector=True):
     """Write the stitched light curve, including both uncertainty columns.
 
-    The trailing ``cadence_s`` column records each point's exposure time.  It
-    matters once a target mixes data sources -- an ``"auto"`` run can hand back
-    20 s SPOC data for one sector and 200 s FFI data for the next.
+    The trailing ``cadence_s`` and ``sector`` columns record each point's
+    provenance.  Both matter once a target mixes data sources -- an ``"auto"``
+    run can hand back 20 s SPOC data for one sector and 200 s FFI data for the
+    next -- and ``sector`` is what lets a downstream fit group points by the
+    sector boundaries (per-sector offsets, jitter terms, dilution) without
+    having to re-derive them from gaps in ``time``.
+
+    Parameters
+    ----------
+    include_sector
+        Append the integer ``sector`` column (default).  Pass ``False`` for the
+        8-column format written before this column existed.
     """
     import csv
 
@@ -524,14 +543,41 @@ def write_lightcurve(result, outfile):
     if cadence is None:
         cadence = np.full(n, np.nan)
 
-    rows = zip(
-        result["t"], result["fcor"], result["fcormed"], result["f"],
-        result["fflat"], result["err_photon"], result["err_empirical"],
-        cadence,
-    )
+    sector = None
+    if include_sector:
+        sector = result.get("sector")
+        if sector is None:
+            # A result dict from an older run (or hand-assembled) has no
+            # per-point array.  A single-sector result is unambiguous; anything
+            # else gets the column dropped rather than a wrong sector written.
+            secs = result.get("sectors") or []
+            only = secs[0] if len(secs) == 1 else None
+            if isinstance(only, dict):
+                only = only.get("sector")
+            if only is not None:
+                sector = np.full(n, int(only), dtype=int)
+            else:
+                warnings.warn(
+                    "No per-point 'sector' array in result; omitting the "
+                    "sector column"
+                )
+        if sector is not None:
+            sector = np.asarray(sector)
+
+    cols = [result["t"], result["fcor"], result["fcormed"], result["f"],
+            result["fflat"], result["err_photon"], result["err_empirical"],
+            cadence]
+    header = ["time", "flux", "flux_med", "flux_raw", "flux_flat",
+              "flux_err_photon", "flux_err_empirical", "cadence_s"]
+    if sector is not None:
+        cols.append(sector)
+        header.append("sector")
+
     with open(outfile, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["time", "flux", "flux_med", "flux_raw", "flux_flat",
-                    "flux_err_photon", "flux_err_empirical", "cadence_s"])
-        for row in rows:
-            w.writerow([f"{v:.10f}" if np.isfinite(v) else "" for v in row])
+        w.writerow(header)
+        for row in zip(*cols):
+            out = [f"{v:.10f}" if np.isfinite(v) else "" for v in row[:8]]
+            if sector is not None:
+                out.append(f"{int(row[8])}")
+            w.writerow(out)

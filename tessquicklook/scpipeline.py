@@ -129,6 +129,7 @@ def quicklooktesssc(
     solver="normal",
     discard_quaternion_fits=False,
     outfile=None,
+    write_sector=True,
     verbose=True,
 ):
     """Run the quick-look pipeline on SPOC short-cadence data for one TIC ID.
@@ -149,6 +150,10 @@ def quicklooktesssc(
         the IDL writes its CSV at the native cadence too (it only rebins for
         transit searching).
 
+    write_sector
+        Include the per-point ``sector`` column when writing ``outfile``
+        (default).  ``False`` restores the earlier 8-column format.
+
     Other parameters carry the same meaning as in
     :func:`~tessquicklook.pipeline.quicklooktessffi`.
 
@@ -156,8 +161,9 @@ def quicklooktesssc(
     -------
     dict
         Same schema as the FFI pipeline -- ``t``, ``f``, ``fcor``, ``fcormed``,
-        ``fflat``, ``err_photon``, ``err_empirical``, ``cadence_s``, plus a
-        ``sectors`` list.  ``f`` here is normalised PDCSAP (carried for
+        ``fflat``, ``err_photon``, ``err_empirical``, ``cadence_s``,
+        ``sector`` (the sector each point came from), plus a ``sectors`` list
+        of per-sector detail.  ``f`` here is normalised PDCSAP (carried for
         comparison, as the IDL does); ``fcor`` is the corrected SAP product and
         is the one to fit.
     """
@@ -183,7 +189,7 @@ def quicklooktesssc(
 
     sectors_out = []
     allt, allf, allfcor, allfcormed = [], [], [], []
-    allerr_ph, allerr_emp, allcad = [], [], []
+    allerr_ph, allerr_emp, allcad, allsec = [], [], [], []
 
     for path in paths:
         lc = load_spoc_lightcurve(path)
@@ -339,6 +345,7 @@ def quicklooktesssc(
             allerr_ph.append(rb["e"])
             allerr_emp.append(np.full(rb["t"].size, emp))
             allcad.append(np.full(rb["t"].size, rebin_minutes * 60.0))
+            allsec.append(np.full(rb["t"].size, sec, dtype=int))
         else:
             allt.append(t)
             allf.append(pdc / np.nanmedian(pdc))
@@ -347,6 +354,7 @@ def quicklooktesssc(
             allerr_ph.append(err_photon)
             allerr_emp.append(np.full(t.size, emp))
             allcad.append(cad_s)
+            allsec.append(np.full(t.size, sec, dtype=int))
 
     if not sectors_out:
         raise RuntimeError("No sectors survived selection")
@@ -354,9 +362,10 @@ def quicklooktesssc(
     t = np.concatenate(allt)
     idx = np.argsort(t)
     t = t[idx]
-    f, fcor, fcormed, err_ph, err_emp, cad = (
+    f, fcor, fcormed, err_ph, err_emp, cad, sec_arr = (
         np.concatenate(a)[idx]
-        for a in (allf, allfcor, allfcormed, allerr_ph, allerr_emp, allcad)
+        for a in (allf, allfcor, allfcormed, allerr_ph, allerr_emp, allcad,
+                  allsec)
     )
 
     flat, _, _ = keplerspline(t, fcor, ndays=ndays)
@@ -375,13 +384,14 @@ def quicklooktesssc(
         "err_photon": err_ph,
         "err_empirical": err_emp,
         "cadence_s": cad,
+        "sector": sec_arr,
         "sectors": sectors_out,
         "variability_basis": variability_basis,
         "source": f"SPOC {exptime:.0f}s",
     }
 
     if outfile:
-        write_lightcurve(result, outfile)
+        write_lightcurve(result, outfile, include_sector=write_sector)
         if verbose:
             print(f"Wrote {outfile}")
     return result

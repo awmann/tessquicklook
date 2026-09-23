@@ -42,6 +42,7 @@ result = quicklooktess(166527623, outfile="lc.csv")
 t    = result["t"]         # BTJD
 flux = result["fcor"]      # systematics removed, stellar variability retained
 cad  = result["cadence_s"] # which cadence each point came from
+sec  = result["sector"]    # which sector each point came from
 ```
 
 `quicklooktess` picks the fastest data available **in each sector**: 20 s SPOC
@@ -217,16 +218,16 @@ cadence is the point.
 ### Output
 
 `result` is a dict with the stitched light curve (`t`, `f`, `fcor`, `fcormed`,
-`fflat`, `err_photon`, `err_empirical`, `cadence_s`) plus a `sectors` list
-holding per-sector detail. For the FFI path that includes masks, the PRF fit,
+`fflat`, `err_photon`, `err_empirical`, `cadence_s`, `sector`) plus a
+`sectors` list holding per-sector detail. For the FFI path that includes masks, the PRF fit,
 quaternions, CBVs and all 20 aperture light curves; for short cadence, the
 quaternions, CBVs, centroids and the `CROWDSAP` actually applied.
 
 The CSV has one row per cadence:
 
 ```
-time,flux,flux_med,flux_raw,flux_flat,flux_err_photon,flux_err_empirical,cadence_s
-1599.8704645676,0.9653315251,0.9655349651,0.9717574967,0.9962399822,0.0008003453,0.0009183710,1800.0
+time,flux,flux_med,flux_raw,flux_flat,flux_err_photon,flux_err_empirical,cadence_s,sector
+1599.8704645676,0.9653315251,0.9655349651,0.9717574967,0.9962399822,0.0008003453,0.0009183710,1800.0,11
 ```
 
 | column | meaning |
@@ -237,6 +238,15 @@ time,flux,flux_med,flux_raw,flux_flat,flux_err_photon,flux_err_empirical,cadence
 | `flux_flat` | `flux` divided by a spline — for transit searches, not for variability |
 | `flux_err_*` | see [Uncertainties](#uncertainties) |
 | `cadence_s` | exposure time of this point — 20, 120, 200, 600 or 1800 |
+| `sector` | TESS sector this point came from |
+
+`sector` is written by default. It is what lets a downstream fit group points by
+sector — per-sector offsets, jitter terms, dilution — without re-deriving the
+boundaries from gaps in `time`, which is unreliable once a sector has its own
+mid-sector downlink gap. Pass `write_sector=False` to any of the three entry
+points (or `include_sector=False` to `write_lightcurve`) to get the previous
+8-column format back; nothing else about the file changes, and the column is
+appended last so readers keying on column *names* are unaffected.
 
 ### Reconstructing the fit
 

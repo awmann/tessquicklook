@@ -11,7 +11,8 @@ short-cadence pipeline (:func:`~tessquicklook.scpipeline.quicklooktesssc`) and
 the FFI pipeline (:func:`~tessquicklook.pipeline.quicklooktessffi`) over their
 respective sector lists and stitches the results.  The correction itself is the
 same code in both cases, so the products are directly concatenable; the
-``cadence_s`` column records which cadence each point came from.
+``cadence_s`` and ``sector`` columns record which cadence and which sector
+each point came from.
 """
 
 from __future__ import annotations
@@ -132,6 +133,7 @@ def quicklooktess(
     ffi_options=None,
     sc_options=None,
     outfile=None,
+    write_sector=True,
     verbose=True,
 ):
     """Run the quick-look pipeline at the best cadence available in each sector.
@@ -166,6 +168,10 @@ def quicklooktess(
         Dicts of extra keywords passed only to the respective pipeline --
         ``xsize``/``ysize``/``skew``/``kurt``/``rebin`` for the FFI path,
         ``rebin``/``rebin_minutes`` for the short-cadence path.
+
+    write_sector
+        Include the per-point ``sector`` column when writing ``outfile``
+        (default).  ``False`` restores the earlier 8-column format.
 
     Returns
     -------
@@ -229,7 +235,8 @@ def quicklooktess(
     if not results:
         raise RuntimeError("Every cadence branch failed; see warnings above")
 
-    keys = ("t", "f", "fcor", "fcormed", "err_photon", "err_empirical", "cadence_s")
+    keys = ("t", "f", "fcor", "fcormed", "err_photon", "err_empirical",
+            "cadence_s", "sector")
     merged = {k: np.concatenate([r[k] for r in results]) for k in keys}
 
     idx = np.argsort(merged["t"])
@@ -259,7 +266,7 @@ def quicklooktess(
     }
 
     if outfile:
-        write_lightcurve(result, outfile)
+        write_lightcurve(result, outfile, include_sector=write_sector)
         if verbose:
             print(f"Wrote {outfile}")
     return result
