@@ -18,6 +18,7 @@ import numpy as np
 __all__ = [
     "query_tic",
     "query_tic_cone",
+    "clean_tic_neighbours",
     "observed_sectors",
     "tess_point_known_sectors",
     "get_tesscut",
@@ -74,7 +75,11 @@ def query_tic(ticid):
 
 
 def query_tic_cone(ra, dec, radius_arcsec=150.0):
-    """Cone search used for dilution: the target plus its neighbours."""
+    """Cone search used for dilution: the target plus its neighbours.
+
+    Returns every TIC row, including DUPLICATE and ARTIFACT entries; pass the
+    result through :func:`clean_tic_neighbours` before using it as a scene.
+    """
     import astropy.units as u
     from astroquery.mast import Catalogs
 
@@ -82,6 +87,57 @@ def query_tic_cone(ra, dec, radius_arcsec=150.0):
         f"{ra} {dec}", radius=radius_arcsec * u.arcsec, catalog="TIC"
     )
     return cat
+
+
+# TIC 8 rows that are not separate sources.  DUPLICATE rows repeat a star that
+# has its own (kept) row, so counting them puts that star's flux into the scene
+# twice; when the twin is the target itself, the target's share of the aperture
+# can never exceed one half and the light curve is over-corrected ~2x.
+# ARTIFACT rows are spurious detections (e.g. diffraction spikes).  SPLIT rows
+# are real, resolved sources and are kept.
+BAD_TIC_DISPOSITIONS = ("DUPLICATE", "ARTIFACT")
+
+
+def _ids(col):
+    """TIC IDs as plain strings ('123', never '123.0'); '' for missing."""
+    out = []
+    for v in np.asarray(col):
+        if v is None or v is np.ma.masked:
+            out.append("")
+            continue
+        s = str(v).strip()
+        if s in ("", "--", "nan", "None"):
+            out.append("")
+            continue
+        try:
+            out.append(str(int(float(s))))
+        except ValueError:
+            out.append(s)
+    return np.array(out)
+
+
+def clean_tic_neighbours(cat, ticid):
+    """Drop the target and every row that is not a separate source.
+
+    Removes the target's own row, DUPLICATE/ARTIFACT rows, and -- when the
+    target ID is itself a DUPLICATE -- the kept row it duplicates (that row is
+    the target again).  Tables without a ``disposition`` column are returned
+    minus the target only.
+    """
+    if cat is None or len(cat) == 0:
+        return cat
+    tid = str(int(ticid))
+    ids = _ids(cat["ID"])
+    keep = ids != tid
+    if "disposition" in cat.colnames:
+        disp = np.array([str(v).strip().upper() for v in np.asarray(cat["disposition"]).astype(str)])
+        keep &= ~np.isin(disp, BAD_TIC_DISPOSITIONS)
+        if "duplicate_id" in cat.colnames:
+            dup_of = _ids(cat["duplicate_id"])
+            twin = dup_of[(ids == tid) & (disp == "DUPLICATE")]
+            if twin.size and twin[0]:
+                keep &= ids != twin[0]
+    return cat[keep]
 
 
 # Special campaigns that the tess-point *package* does not carry, but whose
