@@ -57,8 +57,13 @@ def build_systematics_vectors(
     skew=False,
     kurt=False,
     center_cbvs=False,
+    n=None,
 ):
     """Assemble the systematics design vectors, matching ``quatcorrectonelc``.
+
+    ``quats=None`` builds the quaternion-free basis (CBVs, plus the background
+    terms when ``bg=True``) for sectors whose engineering files are not yet
+    published; ``n`` then gives the number of cadences if no column is built.
 
     Returns ``(vectors, names)`` where ``vectors`` has shape ``(npoints, nvec)``.
 
@@ -79,8 +84,9 @@ def build_systematics_vectors(
         cols.append(a - a.mean() if center else a)
         names.append(name)
 
-    for k in _STD_KEYS:
-        add(quats[k], k)
+    if quats is not None:
+        for k in _STD_KEYS:
+            add(quats[k], k)
 
     if bg:
         if rawdata is None:
@@ -88,13 +94,13 @@ def build_systematics_vectors(
         add(rawdata["medians"], "medians")
         add(rawdata["robmeans"], "robmeans")
 
-    if means:
+    if quats is not None and means:
         for k in _MEAN_KEYS:
             add(quats[k], k)
-    if skew:
+    if quats is not None and skew:
         for k in _SKEW_KEYS:
             add(quats[k], k)
-    if kurt:
+    if quats is not None and kurt:
         for k in _KURT_KEYS:
             add(quats[k], k)
 
@@ -110,7 +116,14 @@ def build_systematics_vectors(
                     add(vec, f"{label}{kk}", center=center_cbvs)
 
     if not cols:
-        return np.zeros((len(quats["q1std"]), 0)), []
+        if n is None:
+            if quats is not None:
+                n = len(quats["q1std"])
+            elif rawdata is not None:
+                n = len(rawdata["t"])
+            else:
+                raise ValueError("no regressors built and no length given")
+        return np.zeros((n, 0)), []
     return np.column_stack(cols), names
 
 

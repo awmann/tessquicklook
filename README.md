@@ -124,6 +124,15 @@ fails, only that **sector** is skipped:
   SKIPPED sector 107: quaternions not yet published  <- permanent, for now
 ```
 
+Quaternion files lag the science data by a sector or two. To keep such a sector
+instead of skipping it, pass `quaternions="auto"`: it uses quaternions where they
+exist and otherwise detrends on the remaining regressors (CBVs with `usecbv=True`,
+plus the background terms). `quaternions="off"` never uses them, which is how to
+check the fallback on a sector that does have them. Each sector records
+`quaternions_used`. Expect noisier curves without them. On three test FFI sectors
+the 1-hour scatter rose by 3-58% without CBVs, and by -8 to +47% with CBVs on in
+both runs, so the default stays `"require"`.
+
 Anything that takes out a whole branch (FFI or short cadence) is also recorded
 in `result["failures"]`, so it survives a blanket
 `warnings.filterwarnings("ignore")`:

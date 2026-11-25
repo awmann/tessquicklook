@@ -130,6 +130,7 @@ def quicklooktess(
     allowscatteredlight=False,
     solver="normal",
     discard_quaternion_fits=False,
+    quaternions="require",
     ffi_options=None,
     sc_options=None,
     outfile=None,
@@ -169,6 +170,10 @@ def quicklooktess(
         ``xsize``/``ysize``/``skew``/``kurt``/``rebin`` for the FFI path,
         ``rebin``/``rebin_minutes`` for the short-cadence path.
 
+    quaternions
+        ``"require"`` (default), ``"auto"`` or ``"off"``; see
+        :func:`~tessquicklook.pipeline.quicklooktessffi`.  ``"auto"`` keeps a
+        sector whose quaternion file is unpublished, detrending it on CBVs only.
     write_sector
         Include the per-point ``sector`` column when writing ``outfile``
         (default).  ``False`` restores the earlier 8-column format.
@@ -197,7 +202,7 @@ def quicklooktess(
                   variability_basis=variability_basis, contamination=contamination,
                   allowscatteredlight=allowscatteredlight, solver=solver,
                   discard_quaternion_fits=discard_quaternion_fits,
-                  verbose=verbose)
+                  quaternions=quaternions, verbose=verbose)
     if corrndays is not None:
         shared["corrndays"] = corrndays
 
