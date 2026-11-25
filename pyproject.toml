@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tessquicklook"
-version = "0.2.2"
+version = "0.3.0"
 description = "TESS light curves with systematics and stellar variability fit simultaneously"
 readme = "README.md"
 requires-python = ">=3.9"

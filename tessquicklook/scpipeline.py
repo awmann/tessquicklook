@@ -30,6 +30,7 @@ import warnings
 
 import numpy as np
 
+from .scattered import spoc_flags
 from .catalog import query_tic
 from .corrections import rebin_lightcurve, undilute
 from .decorrelate import build_systematics_vectors, quatcorrect_one
@@ -274,6 +275,9 @@ def quicklooktesssc(
             except Exception as exc:  # noqa: BLE001
                 warnings.warn(f"CBVs unavailable for sector {sec}: {exc}")
 
+        # scattered-light flags on the full cadence grid (output only)
+        sl_excess_all, sl_flag_all = spoc_flags(lc["bkg"], lc["quality"])
+
         keep = _quality_mask(lc, quats, allowscatteredlight, noexclude)
         if keep.sum() < 50:
             warnings.warn(f"Sector {sec}: only {int(keep.sum())} good cadences; skipping")
@@ -350,6 +354,8 @@ def quicklooktesssc(
             err_photon=err_photon, err_empirical=emp,
             quats=quats_k, quaternions_used=quats is not None, cbvs=cbvs_k, vector_names=vecnames,
             xcms=lc["xcms"][keep], ycms=lc["ycms"][keep],
+            quality=lc["quality"][keep],
+            sl_excess=sl_excess_all[keep], sl_flag=sl_flag_all[keep],
             # Appa Task 2 / awmann/tessquicklook#1: everything needed to
             # reconstruct the exact fitted systematics operator without
             # re-solving. `fcor` came from `vectors`+`fit_coeffs`+
