@@ -30,6 +30,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from .scattered import ffi_flags
 from .idlcompat import contiguous_region, logspace_idl, point_to_point_scatter
 from .prf import fit_tess_prf, get_tess_prf, resample_tess_prf
 
@@ -111,6 +112,9 @@ def extract_photometry(
 
     if addback and bkg_cube is not None:
         flux_cube = flux_cube + np.nan_to_num(bkg_cube)
+
+    # scattered-light sky excess, from the stamp before NaNs are zeroed
+    sky, sl_excess, sl_flag = ffi_flags(flux_cube, quality, time)
 
     flux_cube = np.nan_to_num(flux_cube, nan=0.0, posinf=0.0, neginf=0.0)
     raw_cube = np.nan_to_num(raw_cube, nan=0.0, posinf=0.0, neginf=0.0)
@@ -350,4 +354,7 @@ def extract_photometry(
         "ext1header": ext1header,
         "apheader": apheader,
         "n_bkg_pixels": n_bkg,
+        "sky": sky,
+        "sl_excess": sl_excess,
+        "sl_flag": sl_flag,
     }

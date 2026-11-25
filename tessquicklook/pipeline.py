@@ -377,7 +377,7 @@ def quicklooktessffi(
         vec_keys = ["t", "spacecrafttime", "timecorr", "quality", "cadenceno",
                     "fcirc", "fpsf", "fcircr", "fpsfr", "err_circ_photon",
                     "err_psf_photon", "medians", "robmeans", "xcms", "ycms",
-                    "ffidatetime"]
+                    "ffidatetime", "sky", "sl_excess", "sl_flag"]
         raw_k = _subset(raw, keep, vec_keys)
         quats_k = None if quats is None else {
             k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
@@ -473,6 +473,10 @@ def quicklooktessffi(
             # so the chosen aperture's value is `circcontam[best]` or
             # `psfcontam[best]` depending on `usecirc`.
             circcontam=circcontam, psfcontam=psfcontam,
+            # scattered-light flags on the kept cadences, same keys as the
+            # short-cadence SectorResult (output only; see scattered.py)
+            quality=raw_k["quality"], sky=raw_k["sky"],
+            sl_excess=raw_k["sl_excess"], sl_flag=raw_k["sl_flag"],
             raw=raw_k, data=data, datamed=datamed,
             quats=quats_k, quaternions_used=quats is not None, cbvs=cbvs_k,
             circmasks=raw["circmasks"], psfmasks=raw["psfmasks"],
