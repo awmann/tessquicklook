@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from .catalog import (
+    clean_tic_neighbours,
     get_tesscut,
     observed_sectors,
     query_tic,
@@ -367,10 +368,9 @@ def quicklooktessffi(
         if contamination:
             try:
                 neighbours = query_tic_cone(star["ra"], star["dec"], contam_radius)
-                if neighbours is not None and len(neighbours):
-                    neighbours = neighbours[
-                        np.asarray(neighbours["ID"]).astype(str) != str(int(ticid))
-                    ]
+                # drop the target, DUPLICATE/ARTIFACT rows and the target's own twin:
+                # they are not separate sources, so their flux must not be removed
+                neighbours = clean_tic_neighbours(neighbours, ticid)
                 prf, _, _, nsamp = get_tess_prf(
                     cam, ccd,
                     rowcenter=raw["ext1header"].get("2CRV4P", 0) + raw["timage"].shape[0] / 2.0,
