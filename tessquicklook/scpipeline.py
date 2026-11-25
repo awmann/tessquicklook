@@ -48,6 +48,10 @@ from .systematics import bin_quaternions
 __all__ = ["quicklooktesssc", "flatten_background"]
 
 
+class _QuaternionsOff(Exception):
+    """Internal: quaternions deliberately disabled for this run."""
+
+
 def flatten_background(t, bkg, ndays=0.1, maxiter=40, growth=1.3):
     """Remove the slow component of ``SAP_BKG``, as ``quicklooksector3`` does.
 
@@ -128,11 +132,19 @@ def quicklooktesssc(
     rebin_minutes=30.0,
     solver="normal",
     discard_quaternion_fits=False,
+    quaternions="require",
     outfile=None,
     write_sector=True,
     verbose=True,
 ):
     """Run the quick-look pipeline on SPOC short-cadence data for one TIC ID.
+
+    ``quaternions`` controls the spacecraft-pointing regressors:
+    ``"require"`` (default) skips any sector whose quaternion engineering file
+    is not yet published, as before; ``"auto"`` uses them where available and
+    otherwise falls back to a CBV-only systematics basis; ``"off"`` never uses
+    them (for validating the fallback on sectors that do have quaternions).
+    Each sector result records ``quaternions_used``.
 
     Parameters
     ----------
@@ -209,19 +221,37 @@ def quicklooktesssc(
         # --- systematics regressors -------------------------------------
         # TIME - TIMECORR is spacecraft time, per cadence and exact; the FFI
         # path has to reconstruct this from an ephemeris.
+        if quaternions not in ("require", "auto", "off"):
+            raise ValueError("quaternions must be 'require', 'auto' or 'off'")
         try:
+            if quaternions == "off":
+                raise _QuaternionsOff
             quats = bin_quaternions(
                 lc["spacecrafttime"], sec, cadence=lc["cadence_days"],
                 discard_fits=discard_quaternion_fits,
             )
-        except FileNotFoundError as exc:
-            warnings.warn(
-                f"Sector {sec}: no quaternion data available yet ({exc}); "
-                f"skipping this sector."
-            )
+        except _QuaternionsOff:
+            quats = None
             if verbose:
-                print(f"  SKIPPED sector {sec}: quaternions not yet published")
-            continue
+                print(f"  Sector {sec}: quaternions OFF, CBV-only systematics basis")
+        except FileNotFoundError as exc:
+            if quaternions == "auto":
+                warnings.warn(
+                    f"Sector {sec}: no quaternion data available yet ({exc}); "
+                    f"falling back to a CBV-only systematics basis."
+                )
+                quats = None
+                if verbose:
+                    print(f"  Sector {sec}: quaternions not yet published, "
+                          f"CBV-only systematics basis")
+            else:
+                warnings.warn(
+                    f"Sector {sec}: no quaternion data available yet ({exc}); "
+                    f"skipping this sector."
+                )
+                if verbose:
+                    print(f"  SKIPPED sector {sec}: quaternions not yet published")
+                continue
         except OSError as exc:
             # The data exists but could not be reached -- retryable, unlike the
             # unpublished case above.
@@ -255,8 +285,9 @@ def quicklooktesssc(
         pdc = lc["pdcsap"][keep]
         bkg = lc["bkg"][keep]
 
-        quats_k = {k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
-                   for k, v in quats.items()}
+        quats_k = None if quats is None else {
+            k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
+            for k, v in quats.items()}
         cbvs_k = None
         if cbvs is not None:
             cbvs_k = {k: np.asarray(v)[keep] for k, v in cbvs.items()}
@@ -268,7 +299,7 @@ def quicklooktesssc(
         # removes.  Centred to match this routine.
         vectors, vecnames = build_systematics_vectors(
             quats_k, cbvs=cbvs_k, bg=False, means=not nomeans,
-            skew=skew, kurt=kurt, center_cbvs=True,
+            skew=skew, kurt=kurt, center_cbvs=True, n=int(keep.sum()),
         )
 
         # ...and the "med" variant additionally regresses against the
@@ -317,7 +348,7 @@ def quicklooktesssc(
             t=t, f=pdc / np.nanmedian(pdc), fcor=corlc, fcormed=cormedlc,
             fsap=fsap, sysmodel=sysmodel, bkg=bkg, flatbg=flatbg,
             err_photon=err_photon, err_empirical=emp,
-            quats=quats_k, cbvs=cbvs_k, vector_names=vecnames,
+            quats=quats_k, quaternions_used=quats is not None, cbvs=cbvs_k, vector_names=vecnames,
             xcms=lc["xcms"][keep], ycms=lc["ycms"][keep],
             # Appa Task 2 / awmann/tessquicklook#1: everything needed to
             # reconstruct the exact fitted systematics operator without

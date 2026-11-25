@@ -68,6 +68,10 @@ class SectorResult(dict):
     """Per-sector products, addressable as a dict."""
 
 
+class _QuaternionsOff(Exception):
+    """Internal: quaternions deliberately disabled for this run."""
+
+
 def _sector_from_filename(path):
     """TESScut names look like tess-s0011-1-2_..._astrocut.fits."""
     m = re.search(r"[-_]s(\d{4})[-_](\d)[-_](\d)", Path(path).name)
@@ -171,11 +175,19 @@ def quicklooktessffi(
     product="SPOC",
     solver="normal",
     discard_quaternion_fits=False,
+    quaternions="require",
     outfile=None,
     write_sector=True,
     verbose=True,
 ):
     """Run the quick-look FFI pipeline for one TIC ID.
+
+    ``quaternions`` controls the spacecraft-pointing regressors:
+    ``"require"`` (default) skips any sector whose quaternion engineering file
+    is not yet published, as before; ``"auto"`` uses them where available and
+    otherwise falls back to a CBV-only systematics basis; ``"off"`` never uses
+    them (for validating the fallback on sectors that do have quaternions).
+    Each sector result records ``quaternions_used``.
 
     Parameters mirror the IDL keywords.  ``variability_basis`` is the one
     addition, and it matters:
@@ -308,17 +320,35 @@ def quicklooktessffi(
         # Quaternion engineering files lag the science data by a sector or two.
         # Without them there are no systematics regressors at all, so skip the
         # sector rather than abort the target -- the other sectors are fine.
+        if quaternions not in ("require", "auto", "off"):
+            raise ValueError("quaternions must be 'require', 'auto' or 'off'")
         try:
+            if quaternions == "off":
+                raise _QuaternionsOff
             quats = bin_quaternions(raw["spacecrafttime"], sec, cadence=cadence,
                                     discard_fits=discard_quaternion_fits)
-        except FileNotFoundError as exc:
-            warnings.warn(
-                f"Sector {sec}: no quaternion data available yet ({exc}); "
-                f"skipping this sector."
-            )
+        except _QuaternionsOff:
+            quats = None
             if verbose:
-                print(f"  SKIPPED sector {sec}: quaternions not yet published")
-            continue
+                print(f"  Sector {sec}: quaternions OFF, CBV-only systematics basis")
+        except FileNotFoundError as exc:
+            if quaternions == "auto":
+                warnings.warn(
+                    f"Sector {sec}: no quaternion data available yet ({exc}); "
+                    f"falling back to a CBV-only systematics basis."
+                )
+                quats = None
+                if verbose:
+                    print(f"  Sector {sec}: quaternions not yet published, "
+                          f"CBV-only systematics basis")
+            else:
+                warnings.warn(
+                    f"Sector {sec}: no quaternion data available yet ({exc}); "
+                    f"skipping this sector."
+                )
+                if verbose:
+                    print(f"  SKIPPED sector {sec}: quaternions not yet published")
+                continue
         except OSError as exc:
             # Distinct from the above: the data exists, we could not reach it.
             # Worth separating because it is retryable -- and because catching
@@ -349,8 +379,9 @@ def quicklooktessffi(
                     "err_psf_photon", "medians", "robmeans", "xcms", "ycms",
                     "ffidatetime"]
         raw_k = _subset(raw, keep, vec_keys)
-        quats_k = {k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
-                   for k, v in quats.items()}
+        quats_k = None if quats is None else {
+            k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
+            for k, v in quats.items()}
         cbvs_k = None
         if cbvs is not None:
             cbvs_k = {k: (np.asarray(v)[keep] if np.asarray(v).shape[:1] == keep.shape else v)
@@ -443,7 +474,7 @@ def quicklooktessffi(
             # `psfcontam[best]` depending on `usecirc`.
             circcontam=circcontam, psfcontam=psfcontam,
             raw=raw_k, data=data, datamed=datamed,
-            quats=quats_k, cbvs=cbvs_k,
+            quats=quats_k, quaternions_used=quats is not None, cbvs=cbvs_k,
             circmasks=raw["circmasks"], psfmasks=raw["psfmasks"],
             timage=raw["timage"], prf_fit=raw["prf_fit"],
         ))
